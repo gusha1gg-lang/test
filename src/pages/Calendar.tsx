@@ -1,3 +1,4 @@
+// --- ФАЙЛ: src/pages/Calendar.tsx ---
 import React, { useState, useEffect } from 'react';
 import { api, PlannedWork } from '../api/client';
 
@@ -25,6 +26,7 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigateToNewWork }) => {
       const data = await api.getCalendarWorks(year, month);
       setWorks(data);
     } catch (e) {
+      console.error('Ошибка загрузки работ:', e);
       setWorks([]);
     } finally {
       setLoading(false);
@@ -89,7 +91,10 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigateToNewWork }) => {
         </div>
 
         {loading ? (
-          <div className="text-center py-12 text-gray-500">Загрузка...</div>
+          <div className="text-center py-12 text-gray-500">
+            <div className="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-2"></div>
+            Загрузка...
+          </div>
         ) : (
           <div className="grid grid-cols-7 gap-1">
             {Array.from({ length: startOffset }).map((_, i) => (
@@ -116,15 +121,24 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigateToNewWork }) => {
           </div>
         )}
 
-        <div className="mt-6 pt-4 border-t border-gray-100 flex items-center gap-6 flex-wrap">
-          <span className="text-xs text-gray-500 font-medium">Легенда:</span>
-          {['planned', 'in_progress', 'completed', 'cancelled'].map(s => (
-            <div key={s} className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded" style={{ backgroundColor: getStatusColor(s) }}></span>
-              <span className="text-xs text-gray-600">{getStatusLabel(s)}</span>
-            </div>
-          ))}
-        </div>
+        {!loading && works.length === 0 && (
+          <div className="text-center py-12 text-gray-500">
+            <p className="text-3xl mb-2">📭</p>
+            <p>Нет запланированных работ на этот месяц</p>
+          </div>
+        )}
+
+        {!loading && works.length > 0 && (
+          <div className="mt-6 pt-4 border-t border-gray-100 flex items-center gap-6 flex-wrap">
+            <span className="text-xs text-gray-500 font-medium">Легенда:</span>
+            {['planned', 'in_progress', 'completed', 'cancelled'].map(s => (
+              <div key={s} className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded" style={{ backgroundColor: getStatusColor(s) }}></span>
+                <span className="text-xs text-gray-600">{getStatusLabel(s)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+// --- ФАЙЛ: src/pages/NewWork.tsx ---
 import React, { useState, useEffect } from 'react';
 import { api, ServiceNode } from '../api/client';
 
@@ -8,6 +9,7 @@ interface NewWorkProps {
 
 const NewWork: React.FC<NewWorkProps> = ({ preselectedService, preselectedServiceId }) => {
   const [services, setServices] = useState<ServiceNode[]>([]);
+  const [loadingServices, setLoadingServices] = useState(true);
   const [serviceName, setServiceName] = useState(preselectedService || '');
   const [serviceId, setServiceId] = useState(preselectedServiceId || '');
   const [workTitle, setWorkTitle] = useState('');
@@ -31,11 +33,15 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService, preselectedServic
   }, [preselectedService, preselectedServiceId]);
 
   const loadServices = async () => {
+    setLoadingServices(true);
     try {
       const data = await api.getServicesTree();
-      setServices(data.nodes);
+      setServices(data.nodes || []);
     } catch (e) {
+      console.error('Ошибка загрузки сервисов:', e);
       setServices([]);
+    } finally {
+      setLoadingServices(false);
     }
   };
 
@@ -43,7 +49,7 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService, preselectedServic
     e.preventDefault();
     setError('');
 
-    if (!serviceName) { setError('Выберите сервис'); return; }
+    if (!serviceName) { setError('Выберите SLA-услугу'); return; }
     if (!workTitle) { setError('Укажите название работы'); return; }
     if (!startDate || !startTime || !endDate || !endTime) { setError('Укажите дату и время'); return; }
 
@@ -94,7 +100,7 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService, preselectedServic
             </div>
             <h3 className="text-xl font-bold text-gray-800 mb-2">Работа зарегистрирована!</h3>
             <p className="text-gray-600 mb-4">
-              «{lastResult?.work_title}» для сервиса «{lastResult?.service_name}»
+              «{lastResult?.work_title}» для услуги «{lastResult?.service_name}»
             </p>
             <div className={`border rounded-lg p-4 mb-6 text-left ${
               lastResult?.zabbix_exclusion_created
@@ -139,24 +145,41 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService, preselectedServic
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 SLA-услуга / ИС <span className="text-red-500">*</span>
               </label>
-              <select
-                value={serviceName}
-                onChange={e => {
-                  setServiceName(e.target.value);
-                  const svc = services.find(s => s.name === e.target.value);
-                  if (svc) setServiceId(svc.id);
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              >
-                <option value="">— Выберите услугу из Zabbix —</option>
-                {services.map(s => (
-                  <option key={s.id} value={s.name}>
-                    {s.name} {s.status === 'problem' ? '🔴' : s.status === 'warning' ? '🟡' : '🟢'}
-                  </option>
-                ))}
-              </select>
-              {services.length === 0 && (
-                <p className="text-xs text-yellow-600 mt-1">⚠️ Услуги не загружены — проверьте подключение к Zabbix</p>
+              
+              {loadingServices ? (
+                <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
+                  <div className="animate-spin w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                  <span className="text-sm text-gray-600">Загрузка услуг из Zabbix...</span>
+                </div>
+              ) : services.length === 0 ? (
+                <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <p className="text-sm text-yellow-800 font-medium mb-2">⚠️ Нет доступных SLA-услуг</p>
+                  <p className="text-xs text-yellow-700">
+                    Создайте услуги в Zabbix: <strong>Сервисы → Дерево сервисов → Создать сервис</strong>
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <select
+                    value={serviceName}
+                    onChange={e => {
+                      setServiceName(e.target.value);
+                      const svc = services.find(s => s.name === e.target.value);
+                      if (svc) setServiceId(svc.id);
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="">— Выберите услугу из Zabbix —</option>
+                    {services.map(s => (
+                      <option key={s.id} value={s.name}>
+                        {s.name} {s.status === 'problem' ? '🔴' : s.status === 'warning' ? '🟡' : '🟢'}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Загружено из Zabbix: {services.length} услуг
+                  </p>
+                </>
               )}
             </div>
 
@@ -203,8 +226,8 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService, preselectedServic
 
             <button
               type="submit"
-              disabled={submitting}
-              className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              disabled={submitting || services.length === 0}
+              className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? '⏳ Отправка...' : '💾 Сохранить и отправить в Zabbix'}
             </button>

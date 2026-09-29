@@ -1,3 +1,4 @@
+// --- ФАЙЛ: src/pages/ServiceGraph.tsx ---
 import React, { useEffect, useRef, useState } from 'react';
 import { Network, Options } from 'vis-network';
 import { DataSet } from 'vis-data';
@@ -15,6 +16,7 @@ const ServiceGraph: React.FC<ServiceGraphProps> = ({ onServiceSelect, onNavigate
   const [tree, setTree] = useState<ServicesTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
     loadTree();
@@ -26,9 +28,15 @@ const ServiceGraph: React.FC<ServiceGraphProps> = ({ onServiceSelect, onNavigate
   const loadTree = async () => {
     setLoading(true);
     setError('');
+    setMessage('');
     try {
       const data = await api.getServicesTree();
       setTree(data);
+      
+      // Если есть сообщение от бэкенда (пустой список или ошибка)
+      if ((data as any).message) {
+        setMessage((data as any).message);
+      }
     } catch (e: any) {
       setError(e.message || 'Не удалось загрузить дерево сервисов');
     } finally {
@@ -37,7 +45,7 @@ const ServiceGraph: React.FC<ServiceGraphProps> = ({ onServiceSelect, onNavigate
   };
 
   useEffect(() => {
-    if (!tree || !containerRef.current) return;
+    if (!tree || !containerRef.current || tree.nodes.length === 0) return;
 
     const statusColors: Record<string, string> = {
       ok: '#28a745',
@@ -127,7 +135,7 @@ const ServiceGraph: React.FC<ServiceGraphProps> = ({ onServiceSelect, onNavigate
       <div className="p-6 flex items-center justify-center h-64">
         <div className="text-center">
           <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-500">Загрузка дерева сервисов из Zabbix...</p>
+          <p className="text-gray-500">Загрузка дерева SLA-услуг из Zabbix...</p>
         </div>
       </div>
     );
@@ -148,6 +156,34 @@ const ServiceGraph: React.FC<ServiceGraphProps> = ({ onServiceSelect, onNavigate
     );
   }
 
+  // Если сервисов нет — показываем инструкцию
+  if (!tree || tree.nodes.length === 0) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
+          <span className="text-5xl mb-4 block">🔧</span>
+          <h3 className="text-xl font-bold text-yellow-800 mb-3">В Zabbix нет созданных SLA-услуг</h3>
+          <p className="text-yellow-700 mb-4">
+            {message || 'Для работы портала необходимо создать структуру услуг в Zabbix.'}
+          </p>
+          <div className="bg-white rounded-lg p-4 text-left max-w-md mx-auto mb-4">
+            <p className="text-sm font-medium text-gray-800 mb-2">Как создать услуги:</p>
+            <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
+              <li>Откройте Zabbix веб-интерфейс</li>
+              <li>Перейдите: <strong>Сервисы → Дерево сервисов</strong></li>
+              <li>Нажмите <strong>«Создать сервис»</strong></li>
+              <li>Создайте иерархию услуг вашей ИС</li>
+              <li>Обновите эту страницу</li>
+            </ol>
+          </div>
+          <button onClick={loadTree} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            🔄 Обновить
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -156,7 +192,7 @@ const ServiceGraph: React.FC<ServiceGraphProps> = ({ onServiceSelect, onNavigate
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <h3 className="text-lg font-semibold text-gray-800">Дерево SLA-услуг Zabbix</h3>
-              <span className="text-xs text-gray-500">({tree?.nodes.length || 0} услуг)</span>
+              <span className="text-xs text-gray-500">({tree.nodes.length} услуг)</span>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <span className="flex items-center gap-1"><span className="w-3 h-3 bg-green-500 rounded-full"></span> OK</span>

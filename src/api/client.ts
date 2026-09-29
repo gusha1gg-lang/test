@@ -1,3 +1,4 @@
+// --- ФАЙЛ: src/api/client.ts ---
 // API клиент для работы с FastAPI бэкендом
 const API_BASE = '/api';
 
@@ -35,6 +36,9 @@ export interface HealthStatus {
 export interface ServicesTree {
   nodes: ServiceNode[];
   edges: Array<{ from: string; to: string }>;
+  empty?: boolean;
+  message?: string;
+  error?: boolean;
 }
 
 class ApiClient {

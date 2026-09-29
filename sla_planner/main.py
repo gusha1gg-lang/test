@@ -1,17 +1,18 @@
+# --- ФАЙЛ: sla_planner/main.py ---
 """
-main.py — FastAPI приложение. Точка входа.
+FastAPI приложение. Точка входа.
 Запуск: python main.py
 """
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pathlib import Path
+from fastapi.responses import HTMLResponse
 
 from config import settings
-from database import init_db, get_db
+from database import init_db
 from auth import get_current_user, User
 from routers import works, services, calendar, settings as settings_router
 from zabbix_client import zabbix_client
@@ -59,10 +60,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — разрешаем запросы с фронтенда
+# CORS настройки
+if settings.DEBUG:
+    # В режиме разработки разрешаем все origins
+    allow_origins = ["*"]
+else:
+    # В продакшене — только конкретные домены
+    allow_origins = ["https://sla.corp.local"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В проде заменить на конкретный домен
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -87,10 +95,22 @@ async def health_check(user: User = Depends(get_current_user)):
     }
 
 
-# Статические файлы (для раздачи фронтенда из dist/)
+# Статические файлы (CSS, JS из папки static/)
 STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def read_root():
+    """Главная страница — отдаём index.html"""
+    index_file = Path(__file__).parent / "templates" / "index.html"
+    if index_file.exists():
+        return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        content="<h1>Файл templates/index.html не найден. Выполните: cp dist/index.html templates/index.html</h1>", 
+        status_code=404
+    )
 
 
 # Точка входа при запуске через python main.py

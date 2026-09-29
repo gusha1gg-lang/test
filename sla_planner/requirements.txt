@@ -1,10 +1,12 @@
-fastapi==0.115.0
-uvicorn==0.30.6
-sqlalchemy==2.0.35
-requests==2.32.3
-pydantic==2.9.2
-pydantic-settings==2.5.2
-python-dotenv==1.0.1
-python-jose==3.3.0
-passlib==1.7.4
-psycopg2-binary==2.9.9
+# --- ФАЙЛ: sla_planner/requirements.txt ---
+# Python зависимости с гибкими версиями (совместимо с Python 3.11+)
+fastapi>=0.115.0
+uvicorn>=0.30.6
+sqlalchemy>=2.0.35
+requests>=2.32.3
+pydantic>=2.10.0
+pydantic-settings>=2.5.2
+python-dotenv>=1.0.1
+python-jose>=3.3.0
+passlib>=1.7.4
+psycopg2-binary>=2.9.9

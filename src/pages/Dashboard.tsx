@@ -1,3 +1,4 @@
+// --- ФАЙЛ: src/pages/Dashboard.tsx ---
 import React, { useEffect, useState } from 'react';
 import { api, HealthStatus, PlannedWork } from '../api/client';
 
