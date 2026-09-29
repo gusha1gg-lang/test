@@ -15,6 +15,7 @@ const pageTitles: Record<PageType, string> = {
   settings: '⚙️ Настройки',
   users: '👥 Пользователи',
   groups: '👥 Группы и права доступа',
+  audit: '📝 Аудит-лог',
 };
 
 function getFormattedDate(): string {

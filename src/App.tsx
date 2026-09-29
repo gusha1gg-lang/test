@@ -10,6 +10,7 @@ import Settings from './pages/Settings';
 import SlaReport from './pages/SlaReport';
 import Users from './pages/Users';
 import Groups from './pages/Groups';
+import Audit from './pages/Audit';
 import { PageType } from './types';
 
 function App() {
@@ -53,6 +54,8 @@ function App() {
         return <Users />;
       case 'groups':
         return <Groups />;
+      case 'audit':
+        return <Audit />;
       case 'settings':
         return <Settings />;
       default:

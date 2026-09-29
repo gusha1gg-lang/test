@@ -94,6 +94,22 @@ class PlannedWork(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AuditLog(Base):
+    """Модель аудита — запись всех действий пользователей."""
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    username = Column(String, nullable=False, index=True)
+    action = Column(String, nullable=False)  # create, update, delete, login, logout
+    resource_type = Column(String, nullable=False)  # work, user, group, service
+    resource_id = Column(String, nullable=True)  # ID объекта
+    resource_name = Column(String, nullable=True)  # Название объекта для удобства
+    details = Column(Text, nullable=True)  # JSON с деталями изменения
+    ip_address = Column(String, nullable=True)  # IP адрес пользователя
+    user_agent = Column(String, nullable=True)  # Браузер/клиент
+
+
 # ============================================
 # Pydantic схемы (валидация запросов/ответов)
 # ============================================
@@ -251,6 +267,23 @@ class UserAccessCheck(BaseModel):
     service_id: str
     has_access: bool
     reason: str
+
+
+class AuditLogResponse(BaseModel):
+    """Схема ответа с данными аудита."""
+    id: int
+    timestamp: datetime
+    username: str
+    action: str
+    resource_type: str
+    resource_id: Optional[str]
+    resource_name: Optional[str]
+    details: Optional[str]
+    ip_address: Optional[str]
+    user_agent: Optional[str]
+
+    class Config:
+        from_attributes = True
 
 
 # Обновляем forward references

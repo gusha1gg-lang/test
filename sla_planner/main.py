@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse
 from config import settings
 from database import init_db
 from auth import get_current_user, CurrentUser
-from routers import works, services, calendar, settings as settings_router, users
+from routers import works, services, calendar, settings as settings_router, users, audit
 from zabbix_client import zabbix_client
 
 # Настройка логирования
@@ -82,6 +82,7 @@ app.include_router(services.router, prefix="/api")
 app.include_router(calendar.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+app.include_router(audit.router, prefix="/api")
 
 
 @app.get("/api/health")

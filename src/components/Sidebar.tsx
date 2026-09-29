@@ -15,6 +15,7 @@ const menuItems: Array<{ id: PageType; icon: string; label: string }> = [
   { id: 'sla-report', icon: '📈', label: 'SLA Отчёт' },
   { id: 'users', icon: '👤', label: 'Пользователи' },
   { id: 'groups', icon: '👥', label: 'Группы и права' },
+  { id: 'audit', icon: '📝', label: 'Аудит-лог' },
   { id: 'settings', icon: '⚙️', label: 'Настройки' },
 ];
 

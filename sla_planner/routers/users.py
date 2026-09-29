@@ -3,7 +3,7 @@ routers/users.py — Управление пользователями и гру
 """
 import logging
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -15,6 +15,7 @@ from models import (
     UserAccessCheck,
     user_group_association, group_service_association
 )
+from audit import log_user_action, log_group_action
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ def get_current_user_info(
 @router.post("/users", response_model=UserResponse, status_code=201)
 def create_user(
     user_data: UserCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -88,6 +90,15 @@ def create_user(
     db.commit()
     db.refresh(new_user)
     
+    # Запись в аудит-лог
+    log_user_action(
+        db=db,
+        username=current_user.username,
+        action="create",
+        user=new_user,
+        request=request,
+    )
+    
     logger.info(f"User '{new_user.username}' created by '{current_user.username}'")
     return new_user
 
@@ -96,6 +107,7 @@ def create_user(
 def update_user(
     user_id: int,
     user_data: UserUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -125,6 +137,15 @@ def update_user(
     db.commit()
     db.refresh(user)
     
+    # Запись в аудит-лог
+    log_user_action(
+        db=db,
+        username=current_user.username,
+        action="update",
+        user=user,
+        request=request,
+    )
+    
     logger.info(f"User '{user.username}' updated by '{current_user.username}'")
     return user
 
@@ -132,6 +153,7 @@ def update_user(
 @router.delete("/users/{user_id}", status_code=204)
 def delete_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -148,6 +170,16 @@ def delete_user(
         raise HTTPException(status_code=400, detail="Нельзя удалить самого себя")
     
     username = user.username
+    
+    # Запись в аудит-лог перед удалением
+    log_user_action(
+        db=db,
+        username=current_user.username,
+        action="delete",
+        user=user,
+        request=request,
+    )
+    
     db.delete(user)
     db.commit()
     
@@ -197,6 +229,7 @@ def list_groups(
 @router.post("/groups", response_model=GroupResponse, status_code=201)
 def create_group(
     group_data: GroupCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -224,6 +257,15 @@ def create_group(
     db.commit()
     db.refresh(new_group)
     
+    # Запись в аудит-лог
+    log_group_action(
+        db=db,
+        username=current_user.username,
+        action="create",
+        group=new_group,
+        request=request,
+    )
+    
     logger.info(f"Group '{new_group.name}' created by '{current_user.username}'")
     
     return GroupResponse(
@@ -249,6 +291,7 @@ def create_group(
 def update_group(
     group_id: int,
     group_data: GroupUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -274,6 +317,15 @@ def update_group(
     db.commit()
     db.refresh(group)
     
+    # Запись в аудит-лог
+    log_group_action(
+        db=db,
+        username=current_user.username,
+        action="update",
+        group=group,
+        request=request,
+    )
+    
     logger.info(f"Group '{group.name}' updated by '{current_user.username}'")
     
     return GroupResponse(
@@ -298,6 +350,7 @@ def update_group(
 @router.delete("/groups/{group_id}", status_code=204)
 def delete_group(
     group_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -310,6 +363,16 @@ def delete_group(
         raise HTTPException(status_code=404, detail="Группа не найдена")
     
     group_name = group.name
+    
+    # Запись в аудит-лог перед удалением
+    log_group_action(
+        db=db,
+        username=current_user.username,
+        action="delete",
+        group=group,
+        request=request,
+    )
+    
     db.delete(group)
     db.commit()
     

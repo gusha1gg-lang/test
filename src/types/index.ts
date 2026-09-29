@@ -1,4 +1,4 @@
-export type PageType = 'dashboard' | 'graph' | 'new-work' | 'works-list' | 'calendar' | 'sla-report' | 'settings' | 'users' | 'groups';
+export type PageType = 'dashboard' | 'graph' | 'new-work' | 'works-list' | 'calendar' | 'sla-report' | 'settings' | 'users' | 'groups' | 'audit';
 
 export interface User {
   id: number;

@@ -184,6 +184,40 @@ class ApiClient {
       method: 'POST',
     });
   }
+
+  // ============================================
+  // Аудит-лог
+  // ============================================
+
+  async getAuditLogs(params?: {
+    limit?: number;
+    offset?: number;
+    username?: string;
+    action?: string;
+    resource_type?: string;
+    date_from?: string;
+    date_to?: string;
+  }): Promise<any[]> {
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', params.limit.toString());
+    if (params?.offset) query.set('offset', params.offset.toString());
+    if (params?.username) query.set('username', params.username);
+    if (params?.action) query.set('action', params.action);
+    if (params?.resource_type) query.set('resource_type', params.resource_type);
+    if (params?.date_from) query.set('date_from', params.date_from);
+    if (params?.date_to) query.set('date_to', params.date_to);
+    
+    const queryString = query.toString();
+    return this.request<any[]>(`/audit${queryString ? '?' + queryString : ''}`);
+  }
+
+  async getAuditStats(days: number = 7): Promise<any> {
+    return this.request<any>(`/audit/stats?days=${days}`);
+  }
+
+  async getAuditUsers(): Promise<string[]> {
+    return this.request<string[]>('/audit/users');
+  }
 }
 
 export const api = new ApiClient();

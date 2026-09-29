@@ -5,7 +5,7 @@ routers/works.py — CRUD операции для плановых работ.
 import logging
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -14,6 +14,7 @@ from models import (
     PlannedWork, PlannedWorkCreate, PlannedWorkUpdate, PlannedWorkResponse
 )
 from zabbix_client import zabbix_client
+from audit import log_work_action
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ def get_work(
 @router.post("/works", response_model=PlannedWorkResponse, status_code=201)
 def create_work(
     work: PlannedWorkCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -127,6 +129,15 @@ def create_work(
     db.commit()
     db.refresh(db_work)
     
+    # Запись в аудит-лог
+    log_work_action(
+        db=db,
+        username=current_user.username,
+        action="create",
+        work=db_work,
+        request=request,
+    )
+    
     logger.info(f"Work '{db_work.work_title}' created by '{current_user.username}'")
     return db_work
 
@@ -135,6 +146,7 @@ def create_work(
 def update_work(
     work_id: int,
     update: PlannedWorkUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -169,6 +181,15 @@ def update_work(
     db.commit()
     db.refresh(db_work)
     
+    # Запись в аудит-лог
+    log_work_action(
+        db=db,
+        username=current_user.username,
+        action="update",
+        work=db_work,
+        request=request,
+    )
+    
     logger.info(f"Work '{db_work.id}' updated by '{current_user.username}'")
     return db_work
 
@@ -176,6 +197,7 @@ def update_work(
 @router.delete("/works/{work_id}", status_code=204)
 def delete_work(
     work_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -196,6 +218,16 @@ def delete_work(
             )
     
     work_title = db_work.work_title
+    
+    # Запись в аудит-лог перед удалением
+    log_work_action(
+        db=db,
+        username=current_user.username,
+        action="delete",
+        work=db_work,
+        request=request,
+    )
+    
     db.delete(db_work)
     db.commit()
     
