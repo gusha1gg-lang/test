@@ -7,13 +7,12 @@ interface HeaderProps {
 
 const pageTitles: Record<PageType, string> = {
   dashboard: '📊 Панель управления',
-  graph: '🌐 Плановые работы из графа сервисов',
+  graph: '🌐 SLA-услуги из Zabbix',
   'new-work': '➕ Регистрация плановой работы',
   'works-list': '📋 Список плановых работ',
   calendar: '📅 Календарь плановых работ',
   'sla-report': '📈 SLA Отчёт',
-  settings: '⚙️ Настройки подключения',
-  'backend-docs': '🐍 Backend код (Python/FastAPI)',
+  settings: '⚙️ Настройки',
 };
 
 function getFormattedDate(): string {

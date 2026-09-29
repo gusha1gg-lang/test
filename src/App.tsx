@@ -8,19 +8,20 @@ import WorksList from './pages/WorksList';
 import NewWork from './pages/NewWork';
 import Settings from './pages/Settings';
 import SlaReport from './pages/SlaReport';
-import BackendDocs from './pages/BackendDocs';
 import { PageType } from './types';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<PageType>('dashboard');
   const [selectedService, setSelectedService] = useState<string>('');
+  const [selectedServiceId, setSelectedServiceId] = useState<string>('');
 
   const handleNavigate = useCallback((page: PageType) => {
     setCurrentPage(page);
   }, []);
 
-  const handleServiceSelect = useCallback((serviceName: string) => {
+  const handleServiceSelect = useCallback((serviceName: string, serviceId?: string) => {
     setSelectedService(serviceName);
+    setSelectedServiceId(serviceId || '');
   }, []);
 
   const handleNavigateToNewWork = useCallback(() => {
@@ -39,7 +40,7 @@ function App() {
           />
         );
       case 'new-work':
-        return <NewWork preselectedService={selectedService} />;
+        return <NewWork preselectedService={selectedService} preselectedServiceId={selectedServiceId} />;
       case 'works-list':
         return <WorksList />;
       case 'calendar':
@@ -48,8 +49,6 @@ function App() {
         return <SlaReport />;
       case 'settings':
         return <Settings />;
-      case 'backend-docs':
-        return <BackendDocs />;
       default:
         return <Dashboard />;
     }
@@ -57,15 +56,9 @@ function App() {
 
   return (
     <div className="flex h-screen bg-[#f5f5f5] overflow-hidden">
-      {/* Боковая панель */}
       <Sidebar currentPage={currentPage} onNavigate={handleNavigate} />
-
-      {/* Основная область */}
       <div className="flex-1 ml-[250px] flex flex-col h-screen overflow-hidden">
-        {/* Шапка */}
         <Header currentPage={currentPage} />
-
-        {/* Контент страницы */}
         <main className="flex-1 overflow-y-auto">
           {renderPage()}
         </main>

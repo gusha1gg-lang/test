@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { demoServices } from '../data/mockData';
+import { api, ServiceNode } from '../api/client';
 
 interface NewWorkProps {
   preselectedService?: string;
+  preselectedServiceId?: string;
 }
 
-const NewWork: React.FC<NewWorkProps> = ({ preselectedService }) => {
+const NewWork: React.FC<NewWorkProps> = ({ preselectedService, preselectedServiceId }) => {
+  const [services, setServices] = useState<ServiceNode[]>([]);
   const [serviceName, setServiceName] = useState(preselectedService || '');
+  const [serviceId, setServiceId] = useState(preselectedServiceId || '');
   const [workTitle, setWorkTitle] = useState('');
   const [description, setDescription] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -14,44 +17,62 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService }) => {
   const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('06:00');
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [lastResult, setLastResult] = useState<any>(null);
 
   useEffect(() => {
-    if (preselectedService) {
-      setServiceName(preselectedService);
-    }
-  }, [preselectedService]);
+    loadServices();
+  }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (preselectedService) setServiceName(preselectedService);
+    if (preselectedServiceId) setServiceId(preselectedServiceId);
+  }, [preselectedService, preselectedServiceId]);
+
+  const loadServices = async () => {
+    try {
+      const data = await api.getServicesTree();
+      setServices(data.nodes);
+    } catch (e) {
+      setServices([]);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Валидация
-    if (!serviceName) {
-      setError('Выберите сервис из графа');
-      return;
-    }
-    if (!workTitle) {
-      setError('Укажите название работы');
-      return;
-    }
-    if (!startDate || !startTime || !endDate || !endTime) {
-      setError('Укажите дату и время начала и окончания');
-      return;
-    }
+    if (!serviceName) { setError('Выберите сервис'); return; }
+    if (!workTitle) { setError('Укажите название работы'); return; }
+    if (!startDate || !startTime || !endDate || !endTime) { setError('Укажите дату и время'); return; }
 
     const start = new Date(`${startDate}T${startTime}`);
     const end = new Date(`${endDate}T${endTime}`);
-    if (end <= start) {
-      setError('Время окончания должно быть позже времени начала');
-      return;
-    }
+    if (end <= start) { setError('Время окончания должно быть позже начала'); return; }
 
-    setSubmitted(true);
+    setSubmitting(true);
+    try {
+      const result = await api.createWork({
+        service_name: serviceName,
+        service_id_zabbix: serviceId || undefined,
+        work_title: workTitle,
+        description: description || undefined,
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+      });
+      setLastResult(result);
+      setSubmitted(true);
+    } catch (e: any) {
+      setError(e.message || 'Ошибка сохранения');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleReset = () => {
     setServiceName('');
+    setServiceId('');
     setWorkTitle('');
     setDescription('');
     setStartDate('');
@@ -60,6 +81,7 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService }) => {
     setEndTime('06:00');
     setSubmitted(false);
     setError('');
+    setLastResult(null);
   };
 
   if (submitted) {
@@ -72,27 +94,25 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService }) => {
             </div>
             <h3 className="text-xl font-bold text-gray-800 mb-2">Работа зарегистрирована!</h3>
             <p className="text-gray-600 mb-4">
-              Плановая работа «{workTitle}» для сервиса «{serviceName}» успешно сохранена.
+              «{lastResult?.work_title}» для сервиса «{lastResult?.service_name}»
             </p>
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-6 text-left">
-              <h4 className="text-sm font-medium text-blue-800 mb-2">ℹ️ Статус отправки в Zabbix:</h4>
-              <p className="text-sm text-blue-700">
-                В демо-режиме исключение SLA не создаётся. При подключении к реальному Zabbix серверу 
-                исключение будет добавлено автоматически через метод <code className="bg-blue-100 px-1 rounded">sla.update</code>.
+            <div className={`border rounded-lg p-4 mb-6 text-left ${
+              lastResult?.zabbix_exclusion_created
+                ? 'bg-green-50 border-green-200'
+                : 'bg-yellow-50 border-yellow-200'
+            }`}>
+              <h4 className="text-sm font-medium mb-2">
+                {lastResult?.zabbix_exclusion_created ? '✅ Исключение SLA создано в Zabbix' : '⚠️ Исключение не создано'}
+              </h4>
+              <p className="text-sm">
+                {lastResult?.zabbix_exclusion_created
+                  ? 'Период простоя будет исключён из SLA-отчёта.'
+                  : 'Проверьте подключение к Zabbix в настройках.'}
               </p>
             </div>
             <div className="flex gap-3 justify-center">
-              <button
-                onClick={handleReset}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
+              <button onClick={handleReset} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                 + Ещё одна работа
-              </button>
-              <button
-                onClick={() => window.location.reload()}
-                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-              >
-                К списку работ
               </button>
             </div>
           </div>
@@ -106,40 +126,40 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService }) => {
       <div className="max-w-3xl mx-auto">
         <div className="mb-6">
           <h2 className="text-xl font-bold text-gray-800">➕ Регистрация плановой работы</h2>
-          <p className="text-sm text-gray-500 mt-1">Заполните форму для создания новой плановой работы</p>
+          <p className="text-sm text-gray-500 mt-1">После сохранения работа будет отправлена в Zabbix как исключение SLA</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-              ❌ {error}
-            </div>
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">❌ {error}</div>
           )}
 
           <div className="space-y-5">
-            {/* Сервис */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Имя сервиса / ИС <span className="text-red-500">*</span>
+                SLA-услуга / ИС <span className="text-red-500">*</span>
               </label>
               <select
                 value={serviceName}
-                onChange={e => setServiceName(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                onChange={e => {
+                  setServiceName(e.target.value);
+                  const svc = services.find(s => s.name === e.target.value);
+                  if (svc) setServiceId(svc.id);
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               >
-                <option value="">— Выберите сервис —</option>
-                {demoServices.map(s => (
+                <option value="">— Выберите услугу из Zabbix —</option>
+                {services.map(s => (
                   <option key={s.id} value={s.name}>
                     {s.name} {s.status === 'problem' ? '🔴' : s.status === 'warning' ? '🟡' : '🟢'}
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-gray-400 mt-1">
-                Можно также выбрать кликом по узлу на странице «Плановые из графа»
-              </p>
+              {services.length === 0 && (
+                <p className="text-xs text-yellow-600 mt-1">⚠️ Услуги не загружены — проверьте подключение к Zabbix</p>
+              )}
             </div>
 
-            {/* Название работы */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Название работы <span className="text-red-500">*</span>
@@ -148,97 +168,57 @@ const NewWork: React.FC<NewWorkProps> = ({ preselectedService }) => {
                 type="text"
                 value={workTitle}
                 onChange={e => setWorkTitle(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 placeholder="Например: Обновление PostgreSQL"
               />
             </div>
 
-            {/* Описание */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Описание</label>
               <textarea
                 value={description}
                 onChange={e => setDescription(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                 rows={4}
                 placeholder="Описание плановых работ..."
               />
             </div>
 
-            {/* Даты и время */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Дата и время начала <span className="text-red-500">*</span>
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Начало <span className="text-red-500">*</span></label>
                 <div className="flex gap-2">
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={e => setStartDate(e.target.value)}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
-                  <input
-                    type="time"
-                    value={startTime}
-                    onChange={e => setStartTime(e.target.value)}
-                    className="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
+                  <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none" />
+                  <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none" />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Дата и время окончания <span className="text-red-500">*</span>
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Окончание <span className="text-red-500">*</span></label>
                 <div className="flex gap-2">
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={e => setEndDate(e.target.value)}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
-                  <input
-                    type="time"
-                    value={endTime}
-                    onChange={e => setEndTime(e.target.value)}
-                    className="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
+                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none" />
+                  <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none" />
                 </div>
               </div>
             </div>
 
-            {/* Кнопка отправки */}
             <button
               type="submit"
-              className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors text-sm"
+              disabled={submitting}
+              className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
-              💾 Сохранить и отправить в Zabbix
+              {submitting ? '⏳ Отправка...' : '💾 Сохранить и отправить в Zabbix'}
             </button>
           </div>
         </form>
 
-        {/* Информационный блок */}
         <div className="mt-6 bg-blue-50 border border-blue-100 rounded-xl p-5">
           <h4 className="text-sm font-medium text-blue-800 flex items-center gap-2 mb-3">
-            <span>ℹ️</span> Что произойдёт при отправке в Zabbix:
+            <span>ℹ️</span> Что произойдёт:
           </h4>
           <ul className="space-y-2 text-sm text-blue-700">
-            <li className="flex items-start gap-2">
-              <span className="mt-1">1.</span>
-              <span>Запись о плановой работе будет сохранена в базу данных портала</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="mt-1">2.</span>
-              <span>Через Zabbix API (<code className="bg-blue-100 px-1 rounded">sla.update</code>) будет добавлено исключение простоя</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="mt-1">3.</span>
-              <span>В указанный период недоступность сервиса не будет учитываться в SLA-отчёте</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="mt-1">4.</span>
-              <span>Исключение будет названо: «ПР: {workTitle || '[название работы]'} ({serviceName || '[сервис]'})»</span>
-            </li>
+            <li>1. Запись сохранится в БД портала</li>
+            <li>2. Через Zabbix API (<code className="bg-blue-100 px-1 rounded">sla.update</code>) будет добавлено исключение простоя</li>
+            <li>3. В указанный период недоступность не учитывается в SLA</li>
           </ul>
         </div>
       </div>
