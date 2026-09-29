@@ -8,6 +8,8 @@ import WorksList from './pages/WorksList';
 import NewWork from './pages/NewWork';
 import Settings from './pages/Settings';
 import SlaReport from './pages/SlaReport';
+import Users from './pages/Users';
+import Groups from './pages/Groups';
 import { PageType } from './types';
 
 function App() {
@@ -47,6 +49,10 @@ function App() {
         return <Calendar onNavigateToNewWork={handleNavigateToNewWork} />;
       case 'sla-report':
         return <SlaReport />;
+      case 'users':
+        return <Users />;
+      case 'groups':
+        return <Groups />;
       case 'settings':
         return <Settings />;
       default:

@@ -13,8 +13,8 @@ from fastapi.responses import HTMLResponse
 
 from config import settings
 from database import init_db
-from auth import get_current_user, User
-from routers import works, services, calendar, settings as settings_router
+from auth import get_current_user, CurrentUser
+from routers import works, services, calendar, settings as settings_router, users
 from zabbix_client import zabbix_client
 
 # Настройка логирования
@@ -81,10 +81,11 @@ app.include_router(works.router, prefix="/api")
 app.include_router(services.router, prefix="/api")
 app.include_router(calendar.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
 
 
 @app.get("/api/health")
-async def health_check(user: User = Depends(get_current_user)):
+async def health_check(user: CurrentUser = Depends(get_current_user)):
     """Проверка состояния системы."""
     zabbix_ok = zabbix_client.ping()
     return {
@@ -92,6 +93,8 @@ async def health_check(user: User = Depends(get_current_user)):
         "zabbix_connected": zabbix_ok,
         "mode": "production" if zabbix_ok else "demo",
         "user": user.username,
+        "is_admin": user.is_admin,
+        "groups": user.groups,
     }
 
 

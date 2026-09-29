@@ -1,31 +1,54 @@
 """
 routers/works.py — CRUD операции для плановых работ.
+С проверкой прав доступа к сервисам.
 """
+import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from auth import get_current_user, User
+from auth import get_current_user, CurrentUser, check_service_access, get_accessible_services
 from models import (
     PlannedWork, PlannedWorkCreate, PlannedWorkUpdate, PlannedWorkResponse
 )
 from zabbix_client import zabbix_client
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["works"])
 
 
-@router.get("/works", response_model=list[PlannedWorkResponse])
+@router.get("/works", response_model=List[PlannedWorkResponse])
 def list_works(
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Получение списка плановых работ с фильтрацией по статусу."""
+    """
+    Получение списка плановых работ.
+    Обычные пользователи видят только свои работы.
+    Администраторы видят все работы.
+    """
     query = db.query(PlannedWork)
+    
+    # Фильтрация по статусу
     if status:
         query = query.filter(PlannedWork.status == status)
+    
+    # Фильтрация по доступу (не администраторы видят только свои работы)
+    if not current_user.is_admin:
+        # Получаем доступные сервисы
+        accessible_ids = get_accessible_services(current_user, db)
+        if accessible_ids:
+            query = query.filter(
+                (PlannedWork.service_id_zabbix.in_(accessible_ids)) |
+                (PlannedWork.created_by == current_user.username)
+            )
+        else:
+            query = query.filter(PlannedWork.created_by == current_user.username)
+    
     return query.order_by(PlannedWork.start_time.desc()).all()
 
 
@@ -33,12 +56,19 @@ def list_works(
 def get_work(
     work_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Получение конкретной плановой работы по ID."""
     db_work = db.query(PlannedWork).filter(PlannedWork.id == work_id).first()
     if not db_work:
         raise HTTPException(status_code=404, detail="Work not found")
+    
+    # Проверка доступа
+    if not current_user.is_admin:
+        accessible_ids = get_accessible_services(current_user, db)
+        if db_work.service_id_zabbix not in accessible_ids and db_work.created_by != current_user.username:
+            raise HTTPException(status_code=403, detail="Нет доступа к этой работе")
+    
     return db_work
 
 
@@ -46,11 +76,11 @@ def get_work(
 def create_work(
     work: PlannedWorkCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     Создание новой плановой работы.
-    Автоматически пытается создать исключение SLA в Zabbix.
+    Проверяет права доступа к сервису.
     """
     # Валидация: end > start
     if work.end_time <= work.start_time:
@@ -58,7 +88,16 @@ def create_work(
             status_code=400,
             detail="End time must be after start time"
         )
-
+    
+    # Проверка доступа к сервису
+    if work.service_id_zabbix:
+        has_access = check_service_access(current_user, work.service_id_zabbix, db)
+        if not has_access:
+            raise HTTPException(
+                status_code=403,
+                detail=f"У вас нет доступа к сервису '{work.service_name}'. Обратитесь к администратору."
+            )
+    
     # Создание записи в БД
     db_work = PlannedWork(
         service_name=work.service_name,
@@ -68,9 +107,9 @@ def create_work(
         start_time=work.start_time,
         end_time=work.end_time,
         status="planned",
-        created_by=user.username,
+        created_by=current_user.username,  # Сохраняем реального пользователя
     )
-
+    
     # Попытка создать исключение в Zabbix
     try:
         success = zabbix_client.create_sla_exclusion(
@@ -81,12 +120,14 @@ def create_work(
         )
         db_work.zabbix_exclusion_created = success
     except Exception as e:
-        # Если Zabbix недоступен — просто сохраняем без исключения
+        logger.error(f"Failed to create Zabbix exclusion: {e}")
         db_work.zabbix_exclusion_created = False
-
+    
     db.add(db_work)
     db.commit()
     db.refresh(db_work)
+    
+    logger.info(f"Work '{db_work.work_title}' created by '{current_user.username}'")
     return db_work
 
 
@@ -95,13 +136,24 @@ def update_work(
     work_id: int,
     update: PlannedWorkUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Обновление статуса плановой работы."""
+    """
+    Обновление статуса плановой работы.
+    Пользователь может изменять только свои работы (или все, если админ).
+    """
     db_work = db.query(PlannedWork).filter(PlannedWork.id == work_id).first()
     if not db_work:
         raise HTTPException(status_code=404, detail="Work not found")
-
+    
+    # Проверка доступа
+    if not current_user.is_admin:
+        if db_work.created_by != current_user.username:
+            raise HTTPException(
+                status_code=403,
+                detail="Вы можете изменять только свои работы"
+            )
+    
     if update.status is not None:
         valid_statuses = ["planned", "in_progress", "completed", "cancelled"]
         if update.status not in valid_statuses:
@@ -110,12 +162,14 @@ def update_work(
                 detail=f"Invalid status. Must be one of: {valid_statuses}"
             )
         db_work.status = update.status
-
+    
     if update.zabbix_exclusion_created is not None:
         db_work.zabbix_exclusion_created = update.zabbix_exclusion_created
-
+    
     db.commit()
     db.refresh(db_work)
+    
+    logger.info(f"Work '{db_work.id}' updated by '{current_user.username}'")
     return db_work
 
 
@@ -123,12 +177,26 @@ def update_work(
 def delete_work(
     work_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Удаление плановой работы."""
+    """
+    Удаление плановой работы.
+    Пользователь может удалять только свои работы (или все, если админ).
+    """
     db_work = db.query(PlannedWork).filter(PlannedWork.id == work_id).first()
     if not db_work:
         raise HTTPException(status_code=404, detail="Work not found")
-
+    
+    # Проверка доступа
+    if not current_user.is_admin:
+        if db_work.created_by != current_user.username:
+            raise HTTPException(
+                status_code=403,
+                detail="Вы можете удалять только свои работы"
+            )
+    
+    work_title = db_work.work_title
     db.delete(db_work)
     db.commit()
+    
+    logger.info(f"Work '{work_title}' deleted by '{current_user.username}'")

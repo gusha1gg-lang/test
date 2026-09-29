@@ -13,6 +13,8 @@ const pageTitles: Record<PageType, string> = {
   calendar: '📅 Календарь плановых работ',
   'sla-report': '📈 SLA Отчёт',
   settings: '⚙️ Настройки',
+  users: '👥 Пользователи',
+  groups: '👥 Группы и права доступа',
 };
 
 function getFormattedDate(): string {

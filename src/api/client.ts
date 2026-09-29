@@ -112,6 +112,78 @@ class ApiClient {
       method: 'POST',
     });
   }
+
+  // ============================================
+  // Пользователи и группы
+  // ============================================
+
+  async getUsers(): Promise<any[]> {
+    return this.request<any[]>('/users');
+  }
+
+  async getCurrentUser(): Promise<any> {
+    return this.request<any>('/users/me');
+  }
+
+  async createUser(user: {
+    username: string;
+    email?: string;
+    full_name?: string;
+    is_admin: boolean;
+    group_ids: number[];
+  }): Promise<any> {
+    return this.request<any>('/users', {
+      method: 'POST',
+      body: JSON.stringify(user),
+    });
+  }
+
+  async updateUser(id: number, data: any): Promise<any> {
+    return this.request<any>(`/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteUser(id: number): Promise<void> {
+    await this.request<void>(`/users/${id}`, { method: 'DELETE' });
+  }
+
+  async getGroups(): Promise<any[]> {
+    return this.request<any[]>('/groups');
+  }
+
+  async createGroup(group: {
+    name: string;
+    description?: string;
+    service_ids: string[];
+  }): Promise<any> {
+    return this.request<any>('/groups', {
+      method: 'POST',
+      body: JSON.stringify(group),
+    });
+  }
+
+  async updateGroup(id: number, data: any): Promise<any> {
+    return this.request<any>(`/groups/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteGroup(id: number): Promise<void> {
+    await this.request<void>(`/groups/${id}`, { method: 'DELETE' });
+  }
+
+  async getAllServices(): Promise<any[]> {
+    return this.request<any[]>('/services/all');
+  }
+
+  async syncServices(): Promise<{ status: string; synced: number; message: string }> {
+    return this.request<{ status: string; synced: number; message: string }>('/services/sync', {
+      method: 'POST',
+    });
+  }
 }
 
 export const api = new ApiClient();
