@@ -224,6 +224,16 @@ class ZabbixClient:
         - start_timestamp < end_timestamp
         - Проверка на дубликаты
         - Проверка существования SLA
+        - Проверка пересечения интервалов (warning)
+        
+        Args:
+            service_name: Название сервиса
+            start_timestamp: Unix timestamp начала (UTC)
+            end_timestamp: Unix timestamp окончания (UTC)
+            description: Описание плановой работы
+            
+        Returns:
+            bool: True если исключение создано или уже существует
         """
         # Валидация входных данных
         if start_timestamp >= end_timestamp:
@@ -233,6 +243,11 @@ class ZabbixClient:
         if not service_name or not description:
             logger.error("Missing required parameters: service_name or description")
             raise ValueError("service_name and description are required")
+        
+        # Проверка на окно задним числом (warning, но не ошибка)
+        current_time = datetime.now().timestamp()
+        if start_timestamp < current_time:
+            logger.warning(f"Creating exclusion in the past: {start_timestamp} < {current_time}")
         
         try:
             # 1. Получить текущий SLA с существующими исключениями
@@ -251,15 +266,30 @@ class ZabbixClient:
             # 2. Добавить новое исключение в массив
             existing = sla.get("excluded_downtimes", [])
             
-            # Проверка на дубликаты
+            # Конвертация в строки (Zabbix требует строки)
             new_period_from = str(int(start_timestamp))
             new_period_to = str(int(end_timestamp))
             
+            # Проверка на дубликаты (точное совпадение)
             for exclusion in existing:
                 if (exclusion.get("period_from") == new_period_from and 
                     exclusion.get("period_to") == new_period_to):
                     logger.warning(f"Duplicate exclusion found: {new_period_from} - {new_period_to}")
                     return True  # Уже существует, считаем успехом
+            
+            # Проверка пересечения интервалов (warning, но не блокируем)
+            for exclusion in existing:
+                existing_from = int(exclusion.get("period_from", 0))
+                existing_to = int(exclusion.get("period_to", 0))
+                new_from = int(new_period_from)
+                new_to = int(new_period_to)
+                
+                # Проверка пересечения: (start1 < end2) and (end1 > start2)
+                if new_from < existing_to and new_to > existing_from:
+                    logger.warning(
+                        f"Overlapping exclusion detected: "
+                        f"new [{new_from}-{new_to}] overlaps with existing [{existing_from}-{existing_to}]"
+                    )
             
             new_exclusion = {
                 "name": f"ПР: {description} ({service_name})",
@@ -279,6 +309,143 @@ class ZabbixClient:
 
         except Exception as e:
             logger.error(f"Failed to create SLA exclusion: {e}")
+            return False
+
+    def update_sla_exclusion(
+        self,
+        old_start_timestamp: float,
+        old_end_timestamp: float,
+        new_start_timestamp: float,
+        new_end_timestamp: float,
+        service_name: str,
+        description: str,
+    ) -> bool:
+        """
+        Обновление существующего исключения SLA.
+        
+        Args:
+            old_start_timestamp: Старый Unix timestamp начала (UTC)
+            old_end_timestamp: Старый Unix timestamp окончания (UTC)
+            new_start_timestamp: Новый Unix timestamp начала (UTC)
+            new_end_timestamp: Новый Unix timestamp окончания (UTC)
+            service_name: Название сервиса
+            description: Описание плановой работы
+            
+        Returns:
+            bool: True если исключение обновлено
+        """
+        # Валидация
+        if new_start_timestamp >= new_end_timestamp:
+            raise ValueError("New start time must be before new end time")
+        
+        try:
+            # 1. Получить текущий SLA
+            slas = self._make_request("sla.get", {
+                "filter": {"name": settings.ZABBIX_SLA_NAME},
+                "selectExcludedDowntimes": "extend",
+            })
+
+            if not slas:
+                logger.error(f"SLA '{settings.ZABBIX_SLA_NAME}' not found")
+                return False
+
+            sla = slas[0]
+            slaid = sla["slaid"]
+            existing = sla.get("excluded_downtimes", [])
+            
+            # 2. Найти и удалить старое исключение
+            old_period_from = str(int(old_start_timestamp))
+            old_period_to = str(int(old_end_timestamp))
+            
+            updated_exclusions = [
+                excl for excl in existing
+                if not (excl.get("period_from") == old_period_from and 
+                       excl.get("period_to") == old_period_to)
+            ]
+            
+            if len(updated_exclusions) == len(existing):
+                logger.warning(f"Old exclusion not found: {old_period_from} - {old_period_to}")
+                # Всё равно создаём новое
+            
+            # 3. Добавить новое исключение
+            new_period_from = str(int(new_start_timestamp))
+            new_period_to = str(int(new_end_timestamp))
+            
+            new_exclusion = {
+                "name": f"ПР: {description} ({service_name})",
+                "period_from": new_period_from,
+                "period_to": new_period_to,
+            }
+            updated_exclusions.append(new_exclusion)
+
+            # 4. Обновить SLA
+            self._make_request("sla.update", {
+                "slaid": slaid,
+                "excluded_downtimes": updated_exclusions,
+            })
+            
+            logger.info(f"SLA exclusion updated for '{service_name}': {description}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to update SLA exclusion: {e}")
+            return False
+
+    def delete_sla_exclusion(
+        self,
+        start_timestamp: float,
+        end_timestamp: float,
+    ) -> bool:
+        """
+        Удаление исключения SLA.
+        
+        Args:
+            start_timestamp: Unix timestamp начала (UTC)
+            end_timestamp: Unix timestamp окончания (UTC)
+            
+        Returns:
+            bool: True если исключение удалено
+        """
+        try:
+            # 1. Получить текущий SLA
+            slas = self._make_request("sla.get", {
+                "filter": {"name": settings.ZABBIX_SLA_NAME},
+                "selectExcludedDowntimes": "extend",
+            })
+
+            if not slas:
+                logger.error(f"SLA '{settings.ZABBIX_SLA_NAME}' not found")
+                return False
+
+            sla = slas[0]
+            slaid = sla["slaid"]
+            existing = sla.get("excluded_downtimes", [])
+            
+            # 2. Найти и удалить исключение
+            period_from = str(int(start_timestamp))
+            period_to = str(int(end_timestamp))
+            
+            updated_exclusions = [
+                excl for excl in existing
+                if not (excl.get("period_from") == period_from and 
+                       excl.get("period_to") == period_to)
+            ]
+            
+            if len(updated_exclusions) == len(existing):
+                logger.warning(f"Exclusion not found: {period_from} - {period_to}")
+                return False
+            
+            # 3. Обновить SLA
+            self._make_request("sla.update", {
+                "slaid": slaid,
+                "excluded_downtimes": updated_exclusions,
+            })
+            
+            logger.info(f"SLA exclusion deleted: {period_from} - {period_to}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to delete SLA exclusion: {e}")
             return False
 
     def get_sla_report(self) -> Dict[str, Any]:

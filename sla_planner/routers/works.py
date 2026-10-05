@@ -153,6 +153,8 @@ def update_work(
     """
     Обновление статуса плановой работы.
     Пользователь может изменять только свои работы (или все, если админ).
+    
+    При отмене работы (status='cancelled') — удаляется исключение из Zabbix SLA.
     """
     db_work = db.query(PlannedWork).filter(PlannedWork.id == work_id).first()
     if not db_work:
@@ -165,6 +167,11 @@ def update_work(
                 status_code=403,
                 detail="Вы можете изменять только свои работы"
             )
+    
+    # Сохраняем старые значения для синхронизации с Zabbix
+    old_status = db_work.status
+    old_start_time = db_work.start_time
+    old_end_time = db_work.end_time
     
     if update.status is not None:
         valid_statuses = ["planned", "in_progress", "completed", "cancelled"]
@@ -180,6 +187,25 @@ def update_work(
     
     db.commit()
     db.refresh(db_work)
+    
+    # Синхронизация с Zabbix при отмене работы
+    if db_work.status == "cancelled" and old_status != "cancelled":
+        if db_work.zabbix_exclusion_created:
+            try:
+                # Удаляем исключение из Zabbix
+                success = zabbix_client.delete_sla_exclusion(
+                    start_timestamp=old_start_time.timestamp(),
+                    end_timestamp=old_end_time.timestamp(),
+                )
+                if success:
+                    db_work.zabbix_exclusion_created = False
+                    db.commit()
+                    logger.info(f"Zabbix exclusion deleted for cancelled work: {db_work.id}")
+                else:
+                    logger.warning(f"Failed to delete Zabbix exclusion for work: {db_work.id}")
+            except Exception as e:
+                logger.error(f"Error deleting Zabbix exclusion: {e}")
+                # Не прерываем операцию, просто логируем
     
     # Запись в аудит-лог
     log_work_action(
@@ -204,6 +230,8 @@ def delete_work(
     """
     Удаление плановой работы.
     Пользователь может удалять только свои работы (или все, если админ).
+    
+    При удалении работы — удаляется исключение из Zabbix SLA (если было создано).
     """
     db_work = db.query(PlannedWork).filter(PlannedWork.id == work_id).first()
     if not db_work:
@@ -219,6 +247,21 @@ def delete_work(
     
     work_title = db_work.work_title
     
+    # Удаляем исключение из Zabbix если оно было создано
+    if db_work.zabbix_exclusion_created and db_work.status != "cancelled":
+        try:
+            success = zabbix_client.delete_sla_exclusion(
+                start_timestamp=db_work.start_time.timestamp(),
+                end_timestamp=db_work.end_time.timestamp(),
+            )
+            if success:
+                logger.info(f"Zabbix exclusion deleted for work: {db_work.id}")
+            else:
+                logger.warning(f"Failed to delete Zabbix exclusion for work: {db_work.id}")
+        except Exception as e:
+            logger.error(f"Error deleting Zabbix exclusion: {e}")
+            # Не прерываем операцию, просто логируем
+    
     # Запись в аудит-лог перед удалением
     log_work_action(
         db=db,
@@ -232,3 +275,109 @@ def delete_work(
     db.commit()
     
     logger.info(f"Work '{work_title}' deleted by '{current_user.username}'")
+
+
+@router.post("/works/{work_id}/sync")
+def sync_work_with_zabbix(
+    work_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Повторная синхронизация плановой работы с Zabbix.
+    
+    Используется когда ПР создана в БД, но исключение в Zabbix не создано
+    (например, из-за временной недоступности Zabbix).
+    
+    Только для администраторов или владельца работы.
+    """
+    db_work = db.query(PlannedWork).filter(PlannedWork.id == work_id).first()
+    if not db_work:
+        raise HTTPException(status_code=404, detail="Work not found")
+    
+    # Проверка доступа
+    if not current_user.is_admin and db_work.created_by != current_user.username:
+        raise HTTPException(
+            status_code=403,
+            detail="Нет доступа к этой работе"
+        )
+    
+    # Проверяем что работа не отменена
+    if db_work.status == "cancelled":
+        raise HTTPException(
+            status_code=400,
+            detail="Нельзя синхронизировать отменённую работу"
+        )
+    
+    # Проверяем что исключение ещё не создано
+    if db_work.zabbix_exclusion_created:
+        return {
+            "status": "already_synced",
+            "message": "Исключение уже создано в Zabbix"
+        }
+    
+    # Пытаемся создать исключение в Zabbix
+    try:
+        success = zabbix_client.create_sla_exclusion(
+            service_name=db_work.service_name,
+            start_timestamp=db_work.start_time.timestamp(),
+            end_timestamp=db_work.end_time.timestamp(),
+            description=db_work.work_title,
+        )
+        
+        if success:
+            db_work.zabbix_exclusion_created = True
+            db.commit()
+            logger.info(f"Zabbix exclusion synced for work: {db_work.id}")
+            return {
+                "status": "synced",
+                "message": "Исключение успешно создано в Zabbix"
+            }
+        else:
+            return {
+                "status": "failed",
+                "message": "Не удалось создать исключение в Zabbix"
+            }
+    
+    except Exception as e:
+        logger.error(f"Error syncing work with Zabbix: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка синхронизации: {str(e)}"
+        )
+
+
+@router.get("/works/unsynced")
+def get_unsynced_works(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Получение списка несинхронизированных плановых работ.
+    
+    Возвращает работы, которые созданы в БД, но исключение в Zabbix не создано.
+    Только для администраторов.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Только администраторы могут просматривать несинхронизированные работы"
+        )
+    
+    unsynced = db.query(PlannedWork).filter(
+        PlannedWork.zabbix_exclusion_created == False,
+        PlannedWork.status != "cancelled"
+    ).all()
+    
+    return [
+        {
+            "id": work.id,
+            "service_name": work.service_name,
+            "work_title": work.work_title,
+            "start_time": work.start_time.isoformat(),
+            "end_time": work.end_time.isoformat(),
+            "status": work.status,
+            "created_by": work.created_by,
+        }
+        for work in unsynced
+    ]
