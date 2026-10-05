@@ -9,10 +9,21 @@ zabbix_client.py — Обёртка над Zabbix 7.0 API.
 """
 import requests
 import logging
+import time
 from typing import Optional, Dict, Any, List
+from datetime import datetime, timedelta
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class ZabbixAPIError(Exception):
+    """Кастомное исключение для ошибок Zabbix API."""
+    def __init__(self, code: int, message: str, data: str = ""):
+        self.code = code
+        self.message = message
+        self.data = data
+        super().__init__(f"Zabbix API error {code}: {message} - {data}")
 
 
 class ZabbixClient:
@@ -21,10 +32,33 @@ class ZabbixClient:
     def __init__(self):
         self.url = settings.ZABBIX_URL
         self.auth_token: Optional[str] = None
+        self.token_expires_at: Optional[datetime] = None
         self.request_id = 0
+        self.max_retries = 3
+        self.retry_delay = 1  # секунды
 
-    def _make_request(self, method: str, params: dict) -> Any:
-        """Выполнение JSON-RPC запроса к Zabbix API."""
+    def _is_token_valid(self) -> bool:
+        """Проверка валидности токена."""
+        if not self.auth_token:
+            return False
+        if self.token_expires_at and datetime.now() >= self.token_expires_at:
+            return False
+        return True
+
+    def _make_request(self, method: str, params: dict, retry_count: int = 0) -> Any:
+        """
+        Выполнение JSON-RPC запроса к Zabbix API с retry логикой.
+        
+        Args:
+            method: Метод Zabbix API
+            params: Параметры запроса
+            retry_count: Текущая попытка (для retry)
+        """
+        # Проверка токена и перелогин если нужно
+        if method != "user.login" and not self._is_token_valid():
+            logger.info("Token expired or missing, re-authenticating...")
+            self.login()
+
         self.request_id += 1
         payload = {
             "jsonrpc": "2.0",
@@ -39,25 +73,56 @@ class ZabbixClient:
             response = requests.post(
                 self.url,
                 json=payload,
-                timeout=10,
+                timeout=30,  # Увеличен таймаут
                 headers={"Content-Type": "application/json-rpc"},
             )
+            
+            # Retry на 5xx ошибки
+            if response.status_code >= 500 and retry_count < self.max_retries:
+                delay = self.retry_delay * (2 ** retry_count)  # Экспоненциальный backoff
+                logger.warning(f"Zabbix returned {response.status_code}, retrying in {delay}s...")
+                time.sleep(delay)
+                return self._make_request(method, params, retry_count + 1)
+            
             response.raise_for_status()
             result = response.json()
 
             if "error" in result:
-                error_msg = result["error"].get("data", "Unknown error")
-                logger.error(f"Zabbix API error: {result['error']}")
-                raise Exception(f"Zabbix API: {error_msg}")
+                error = result["error"]
+                code = error.get("code", -1)
+                message = error.get("message", "Unknown error")
+                data = error.get("data", "")
+                
+                # Перелогин при 401 (невалидный токен)
+                if code == -32602 or "not authorized" in data.lower():
+                    logger.warning("Token invalid, re-authenticating...")
+                    self.login()
+                    if retry_count < self.max_retries:
+                        return self._make_request(method, params, retry_count + 1)
+                
+                logger.error(f"Zabbix API error: {message} - {data}")
+                raise ZabbixAPIError(code, message, data)
 
             return result.get("result", {})
 
         except requests.exceptions.ConnectionError:
-            logger.error("Cannot connect to Zabbix server")
+            if retry_count < self.max_retries:
+                delay = self.retry_delay * (2 ** retry_count)
+                logger.warning(f"Connection failed, retrying in {delay}s...")
+                time.sleep(delay)
+                return self._make_request(method, params, retry_count + 1)
+            logger.error("Cannot connect to Zabbix server after retries")
             raise ConnectionError("Zabbix server unavailable")
         except requests.exceptions.Timeout:
-            logger.error("Zabbix request timeout")
+            if retry_count < self.max_retries:
+                delay = self.retry_delay * (2 ** retry_count)
+                logger.warning(f"Request timeout, retrying in {delay}s...")
+                time.sleep(delay)
+                return self._make_request(method, params, retry_count + 1)
+            logger.error("Zabbix request timeout after retries")
             raise TimeoutError("Zabbix request timeout")
+        except ZabbixAPIError:
+            raise  # Пробрасываем кастомное исключение
         except requests.exceptions.RequestException as e:
             logger.error(f"Zabbix request failed: {e}")
             raise
@@ -66,6 +131,7 @@ class ZabbixClient:
         """
         Авторизация в Zabbix.
         В Zabbix 7.0 используется параметр 'username' (не 'user').
+        Токен действителен 4 часа (стандартное значение Zabbix).
         """
         try:
             result = self._make_request("user.login", {
@@ -73,6 +139,8 @@ class ZabbixClient:
                 "password": settings.ZABBIX_PASSWORD,
             })
             self.auth_token = result
+            # Токен действителен 4 часа (стандарт Zabbix)
+            self.token_expires_at = datetime.now() + timedelta(hours=4)
             logger.info("Successfully authenticated with Zabbix")
             return True
         except Exception as e:
@@ -151,7 +219,21 @@ class ZabbixClient:
 
         В Zabbix 7.0 НЕТ метода sla.createexclusion.
         Исключения добавляются через sla.update с ПОЛНЫМ массивом excluded_downtimes.
+        
+        Валидация:
+        - start_timestamp < end_timestamp
+        - Проверка на дубликаты
+        - Проверка существования SLA
         """
+        # Валидация входных данных
+        if start_timestamp >= end_timestamp:
+            logger.error(f"Invalid timestamps: start ({start_timestamp}) >= end ({end_timestamp})")
+            raise ValueError("Start time must be before end time")
+        
+        if not service_name or not description:
+            logger.error("Missing required parameters: service_name or description")
+            raise ValueError("service_name and description are required")
+        
         try:
             # 1. Получить текущий SLA с существующими исключениями
             slas = self._make_request("sla.get", {
@@ -168,10 +250,21 @@ class ZabbixClient:
 
             # 2. Добавить новое исключение в массив
             existing = sla.get("excluded_downtimes", [])
+            
+            # Проверка на дубликаты
+            new_period_from = str(int(start_timestamp))
+            new_period_to = str(int(end_timestamp))
+            
+            for exclusion in existing:
+                if (exclusion.get("period_from") == new_period_from and 
+                    exclusion.get("period_to") == new_period_to):
+                    logger.warning(f"Duplicate exclusion found: {new_period_from} - {new_period_to}")
+                    return True  # Уже существует, считаем успехом
+            
             new_exclusion = {
                 "name": f"ПР: {description} ({service_name})",
-                "period_from": str(int(start_timestamp)),
-                "period_to": str(int(end_timestamp)),
+                "period_from": new_period_from,
+                "period_to": new_period_to,
             }
             updated_exclusions = existing + [new_exclusion]
 
@@ -180,7 +273,7 @@ class ZabbixClient:
                 "slaid": slaid,
                 "excluded_downtimes": updated_exclusions,
             })
-
+            
             logger.info(f"SLA exclusion created for '{service_name}': {description}")
             return True
 
