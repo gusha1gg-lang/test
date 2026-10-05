@@ -63,10 +63,38 @@ const ServiceGraph: React.FC<ServiceGraphProps> = ({ onServiceSelect, onNavigate
       return level;
     };
 
+    // Формирование тултипа с информацией об алгоритме и propagation rule
+    const getAlgorithmLabel = (algorithm?: string): string => {
+      const labels: Record<string, string> = {
+        'all': '🔽 Падает если ВСЕ дети недоступны',
+        'min_n': '🔢 Падает если N детей недоступны',
+        'percent': '📊 Падает если % детей недоступен',
+      };
+      return labels[algorithm || 'all'] || labels['all'];
+    };
+
+    const getPropagationLabel = (propagation?: string): string => {
+      const labels: Record<string, string> = {
+        'as_problem': '⚠️ Как проблема',
+        'as_ok': '✅ Как OK',
+        'ignore': '🚫 Игнорировать',
+      };
+      return labels[propagation || 'as_problem'] || labels['as_problem'];
+    };
+
     const visNodes = new DataSet(
       tree.nodes.map(node => ({
         id: node.id,
         label: node.name,
+        title: `<div style="padding: 8px; max-width: 300px;">
+          <strong>${node.name}</strong><br/>
+          <span style="color: ${statusColors[node.status]};">● Статус: ${node.status.toUpperCase()}</span><br/>
+          <hr style="margin: 4px 0;"/>
+          <strong>Алгоритм:</strong> ${getAlgorithmLabel(node.algorithm)}<br/>
+          <strong>Распространение:</strong> ${getPropagationLabel(node.propagation_rule)}<br/>
+          ${node.weight ? `<strong>Вес:</strong> ${node.weight}<br/>` : ''}
+          ${node.description ? `<hr style="margin: 4px 0;"/><em>${node.description}</em>` : ''}
+        </div>`,
         color: {
           background: statusColors[node.status] || '#6c757d',
           border: statusColors[node.status] || '#6c757d',

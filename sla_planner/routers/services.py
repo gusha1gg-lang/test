@@ -157,7 +157,13 @@ def _sync_services_to_db(db: Session, nodes: list) -> int:
     """
     Синхронизация сервисов из Zabbix с локальной БД.
     Возвращает количество синхронизированных сервисов.
+    
+    Синхронизирует:
+    - Базовые данные сервиса (name, status, algorithm)
+    - Правила расчёта (propagation_rule, weight, sortorder)
+    - Метаданные (description)
     """
+    from models import ServiceRule
     synced = 0
     
     for node in nodes:
@@ -173,6 +179,10 @@ def _sync_services_to_db(db: Session, nodes: list) -> int:
             existing.name = node.get("name", existing.name)
             existing.status = node.get("status", existing.status)
             existing.algorithm = node.get("algorithm", existing.algorithm)
+            existing.propagation_rule = node.get("propagation_rule", existing.propagation_rule)
+            existing.sortorder = node.get("sortorder", existing.sortorder)
+            existing.weight = node.get("weight", existing.weight)
+            existing.description = node.get("description", existing.description)
             existing.parent_id = node.get("parent_id", existing.parent_id)
         else:
             # Создаём новый
@@ -181,9 +191,31 @@ def _sync_services_to_db(db: Session, nodes: list) -> int:
                 name=node.get("name", ""),
                 status=node.get("status", "ok"),
                 algorithm=node.get("algorithm"),
+                propagation_rule=node.get("propagation_rule"),
+                sortorder=node.get("sortorder"),
+                weight=node.get("weight"),
+                description=node.get("description"),
                 parent_id=node.get("parent_id"),
             )
             db.add(new_service)
+        
+        # Синхронизируем правила расчёта
+        rule = db.query(ServiceRule).filter(ServiceRule.service_id == service_id).first()
+        if rule:
+            # Обновляем существующее правило
+            rule.algorithm = node.get("algorithm", rule.algorithm)
+            rule.propagation_rule = node.get("propagation_rule", rule.propagation_rule)
+            rule.weight = node.get("weight", rule.weight)
+        else:
+            # Создаём новое правило
+            new_rule = ServiceRule(
+                service_id=service_id,
+                algorithm=node.get("algorithm", "all"),
+                propagation_rule=node.get("propagation_rule"),
+                weight=node.get("weight"),
+                source="zabbix",
+            )
+            db.add(new_rule)
         
         synced += 1
     

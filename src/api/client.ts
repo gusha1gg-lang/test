@@ -7,8 +7,13 @@ export interface ServiceNode {
   name: string;
   status: string;
   algorithm?: string;
+  propagation_rule?: string;
+  sortorder?: string;
+  weight?: string;
+  description?: string;
   parent_id?: string | null;
   children?: string[];
+  tags?: string[];
 }
 
 export interface PlannedWork {

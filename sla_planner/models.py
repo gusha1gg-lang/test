@@ -69,11 +69,38 @@ class Service(Base):
     name = Column(String, nullable=False)
     status = Column(String, default="ok")
     algorithm = Column(String, nullable=True)
+    propagation_rule = Column(String, nullable=True)  # as_problem, as_ok, ignore
+    sortorder = Column(String, nullable=True)
+    weight = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
     parent_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Связь с группами
     groups = relationship("UserGroup", secondary=group_service_association, back_populates="services")
+    # Связь с правилами расчёта
+    rules = relationship("ServiceRule", back_populates="service", cascade="all, delete-orphan")
+
+
+class ServiceRule(Base):
+    """Модель правила расчёта доступности сервиса."""
+    __tablename__ = "service_rules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    service_id = Column(String, ForeignKey("services.id"), nullable=False, index=True)
+    algorithm = Column(String, nullable=False)  # all, min_n, percent
+    propagation_rule = Column(String, nullable=True)  # as_problem, as_ok, ignore
+    weight = Column(String, nullable=True)
+    trigger_ids = Column(Text, nullable=True)  # JSON массив ID триггеров
+    expression = Column(Text, nullable=True)  # Выражение триггера
+    source = Column(String, default="zabbix")  # zabbix, manual
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Связь с сервисом
+    service = relationship("Service", back_populates="rules")
 
 
 class PlannedWork(Base):
@@ -255,7 +282,28 @@ class ServiceResponse(BaseModel):
     name: str
     status: str
     algorithm: Optional[str]
+    propagation_rule: Optional[str]
+    sortorder: Optional[str]
+    weight: Optional[str]
+    description: Optional[str]
     parent_id: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class ServiceRuleResponse(BaseModel):
+    """Схема ответа с данными правила расчёта."""
+    id: int
+    service_id: str
+    algorithm: str
+    propagation_rule: Optional[str]
+    weight: Optional[str]
+    trigger_ids: Optional[str]
+    expression: Optional[str]
+    source: str
+    created_at: datetime
+    updated_at: Optional[datetime]
 
     class Config:
         from_attributes = True

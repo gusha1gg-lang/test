@@ -160,9 +160,20 @@ class ZabbixClient:
         """
         Получение дерева сервисов для vis-network.
         Возвращает nodes и edges для отображения графа.
+        
+        Запрашиваемые поля:
+        - serviceid, name, algorithm, status (базовые)
+        - propagation_rule, sortorder, weight (правила расчёта)
+        - description, created_at (метаданные)
+        - parents, children (иерархия)
+        - tags (теги)
         """
         services = self._make_request("service.get", {
-            "output": ["serviceid", "name", "algorithm", "status"],
+            "output": [
+                "serviceid", "name", "algorithm", "status",
+                "propagation_rule", "sortorder", "weight",
+                "description", "created_at",
+            ],
             "selectParents": ["serviceid"],
             "selectChildren": ["serviceid"],
             "selectTags": "extend",
@@ -182,20 +193,37 @@ class ZabbixClient:
             # Определяем алгоритм
             algorithm_map = {"1": "all", "2": "min_n", "3": "percent"}
             algorithm = algorithm_map.get(str(svc.get("algorithm", "1")), "all")
+            
+            # Propagation rule (как статус распространяется на родителей)
+            propagation_rule = svc.get("propagation_rule", "1")
+            propagation_map = {
+                "1": "as_problem",  # как проблема
+                "2": "as_ok",       # как OK
+                "3": "ignore",      # игнорировать
+            }
+            propagation = propagation_map.get(str(propagation_rule), "as_problem")
 
             parent_id = None
             if svc.get("parents") and len(svc["parents"]) > 0:
                 parent_id = svc["parents"][0]["serviceid"]
 
             children = [c["serviceid"] for c in svc.get("children", [])]
+            
+            # Теги
+            tags = [tag.get("tag", "") for tag in svc.get("tags", [])]
 
             nodes.append({
                 "id": svc["serviceid"],
                 "name": svc["name"],
                 "status": status,
                 "algorithm": algorithm,
+                "propagation_rule": propagation,
+                "sortorder": svc.get("sortorder", "0"),
+                "weight": svc.get("weight", "1"),
+                "description": svc.get("description", ""),
                 "parent_id": parent_id,
                 "children": children,
+                "tags": tags,
             })
 
             # Рёбра графа
@@ -206,6 +234,41 @@ class ZabbixClient:
                 })
 
         return {"nodes": nodes, "edges": edges}
+    
+    def get_service_triggers(self, service_id: str) -> List[Dict]:
+        """
+        Получение триггеров, связанных с сервисом.
+        Использует problem_tags для поиска триггеров.
+        """
+        try:
+            # Получаем сервис с тегами проблем
+            services = self._make_request("service.get", {
+                "serviceids": [service_id],
+                "selectProblemTags": "extend",
+            })
+            
+            if not services:
+                return []
+            
+            service = services[0]
+            problem_tags = service.get("problem_tags", [])
+            
+            if not problem_tags:
+                return []
+            
+            # Ищем триггеры по тегам
+            triggers = self._make_request("trigger.get", {
+                "output": ["triggerid", "description", "expression", "priority", "value"],
+                "selectTags": "extend",
+                "tags": problem_tags,
+                "evaltype": "0",  # AND
+            })
+            
+            return triggers
+            
+        except Exception as e:
+            logger.error(f"Failed to get triggers for service {service_id}: {e}")
+            return []
 
     def create_sla_exclusion(
         self,
