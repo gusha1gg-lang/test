@@ -82,6 +82,7 @@ class ZabbixClient:
     def ping(self) -> bool:
         """Проверка доступности Zabbix сервера."""
         try:
+            # Zabbix 7.0 требует params даже для apiinfo.version
             self._make_request("apiinfo.version", {})
             return True
         except Exception:
