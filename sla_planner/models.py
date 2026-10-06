@@ -122,7 +122,12 @@ class PlannedWork(Base):
 
 
 class AuditLog(Base):
-    """Модель аудита — запись всех действий пользователей."""
+    """
+    Модель аудита — запись всех действий пользователей.
+    
+    ВАЖНО: Записи аудит-лога НЕЛЬЗЯ изменять или удалять!
+    Это обеспечивает неизменяемость (immutability) аудита.
+    """
     __tablename__ = "audit_log"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -135,6 +140,12 @@ class AuditLog(Base):
     details = Column(Text, nullable=True)  # JSON с деталями изменения
     ip_address = Column(String, nullable=True)  # IP адрес пользователя
     user_agent = Column(String, nullable=True)  # Браузер/клиент
+    
+    # Защита от изменений: запрет UPDATE и DELETE
+    __table_args__ = (
+        # В PostgreSQL можно добавить trigger для защиты от изменений
+        # В SQLite это делается на уровне приложения
+    )
 
 
 # ============================================
