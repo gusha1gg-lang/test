@@ -44,118 +44,137 @@ const ServiceGraph: React.FC<ServiceGraphProps> = ({ onServiceSelect, onNavigate
     }
   };
 
+  // Ограничение для больших деревьев
+  const MAX_NODES = 500;
+
   useEffect(() => {
     if (!tree || !containerRef.current || tree.nodes.length === 0) return;
 
-    const statusColors: Record<string, string> = {
-      ok: '#28a745',
-      warning: '#ffc107',
-      problem: '#dc3545',
-    };
+    // Debounce для перерисовки
+    const timer = setTimeout(() => {
+      const statusColors: Record<string, string> = {
+        ok: '#28a745',
+        warning: '#ffc107',
+        problem: '#dc3545',
+      };
 
-    const getLevel = (nodeId: string): number => {
-      let level = 0;
-      let current = tree.nodes.find(n => n.id === nodeId);
-      while (current?.parent_id) {
-        level++;
-        current = tree.nodes.find(n => n.id === current!.parent_id);
+      const getLevel = (nodeId: string): number => {
+        let level = 0;
+        let current = tree.nodes.find(n => n.id === nodeId);
+        while (current?.parent_id) {
+          level++;
+          current = tree.nodes.find(n => n.id === current!.parent_id);
+        }
+        return level;
+      };
+
+      // Формирование тултипа с информацией об алгоритме и propagation rule
+      const getAlgorithmLabel = (algorithm?: string): string => {
+        const labels: Record<string, string> = {
+          'all': '🔽 Падает если ВСЕ дети недоступны',
+          'min_n': '🔢 Падает если N детей недоступны',
+          'percent': '📊 Падает если % детей недоступен',
+        };
+        return labels[algorithm || 'all'] || labels['all'];
+      };
+
+      const getPropagationLabel = (propagation?: string): string => {
+        const labels: Record<string, string> = {
+          'as_problem': '⚠️ Как проблема',
+          'as_ok': '✅ Как OK',
+          'ignore': '🚫 Игнорировать',
+        };
+        return labels[propagation || 'as_problem'] || labels['as_problem'];
+      };
+
+      // Ограничение для больших деревьев
+      let nodesToRender = tree.nodes;
+      let edgesToRender = tree.edges;
+
+      if (tree.nodes.length > MAX_NODES) {
+        console.warn(`Large tree detected: ${tree.nodes.length} nodes. Limiting to ${MAX_NODES}.`);
+        nodesToRender = tree.nodes.slice(0, MAX_NODES);
+        const nodeIds = new Set(nodesToRender.map(n => n.id));
+        edgesToRender = tree.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to));
       }
-      return level;
-    };
 
-    // Формирование тултипа с информацией об алгоритме и propagation rule
-    const getAlgorithmLabel = (algorithm?: string): string => {
-      const labels: Record<string, string> = {
-        'all': '🔽 Падает если ВСЕ дети недоступны',
-        'min_n': '🔢 Падает если N детей недоступны',
-        'percent': '📊 Падает если % детей недоступен',
-      };
-      return labels[algorithm || 'all'] || labels['all'];
-    };
-
-    const getPropagationLabel = (propagation?: string): string => {
-      const labels: Record<string, string> = {
-        'as_problem': '⚠️ Как проблема',
-        'as_ok': '✅ Как OK',
-        'ignore': '🚫 Игнорировать',
-      };
-      return labels[propagation || 'as_problem'] || labels['as_problem'];
-    };
-
-    const visNodes = new DataSet(
-      tree.nodes.map(node => ({
-        id: node.id,
-        label: node.name,
-        title: `<div style="padding: 8px; max-width: 300px;">
-          <strong>${node.name}</strong><br/>
-          <span style="color: ${statusColors[node.status]};">● Статус: ${node.status.toUpperCase()}</span><br/>
-          <hr style="margin: 4px 0;"/>
-          <strong>Алгоритм:</strong> ${getAlgorithmLabel(node.algorithm)}<br/>
-          <strong>Распространение:</strong> ${getPropagationLabel(node.propagation_rule)}<br/>
-          ${node.weight ? `<strong>Вес:</strong> ${node.weight}<br/>` : ''}
-          ${node.description ? `<hr style="margin: 4px 0;"/><em>${node.description}</em>` : ''}
-        </div>`,
-        color: {
-          background: statusColors[node.status] || '#6c757d',
-          border: statusColors[node.status] || '#6c757d',
-          highlight: {
+      const visNodes = new DataSet(
+        nodesToRender.map(node => ({
+          id: node.id,
+          label: node.name,
+          title: `<div style="padding: 8px; max-width: 300px;">
+            <strong>${node.name}</strong><br/>
+            <span style="color: ${statusColors[node.status]};">● Статус: ${node.status.toUpperCase()}</span><br/>
+            <hr style="margin: 4px 0;"/>
+            <strong>Алгоритм:</strong> ${getAlgorithmLabel(node.algorithm)}<br/>
+            <strong>Распространение:</strong> ${getPropagationLabel(node.propagation_rule)}<br/>
+            ${node.weight ? `<strong>Вес:</strong> ${node.weight}<br/>` : ''}
+            ${node.description ? `<hr style="margin: 4px 0;"/><em>${node.description}</em>` : ''}
+          </div>`,
+          color: {
             background: statusColors[node.status] || '#6c757d',
-            border: '#0d6efd',
+            border: statusColors[node.status] || '#6c757d',
+            highlight: {
+              background: statusColors[node.status] || '#6c757d',
+              border: '#0d6efd',
+            },
+          },
+          font: { color: '#ffffff', size: 13, face: 'system-ui' },
+          shape: 'box' as const,
+          shapeProperties: { borderRadius: 8 },
+          borderWidth: 2,
+          borderWidthSelected: 4,
+          margin: 12,
+          level: getLevel(node.id),
+        }))
+      );
+
+      const visEdges = new DataSet(
+        edgesToRender.map((edge, i) => ({
+          id: `e${i}`,
+          from: edge.from,
+          to: edge.to,
+          arrows: { to: { enabled: true, scaleFactor: 0.8 } },
+          color: { color: '#adb5bd', highlight: '#0d6efd' },
+          width: 2,
+          smooth: { type: 'cubicBezier' as const, forceDirection: 'vertical' as const, roundness: 0.4 },
+        }))
+      );
+
+      const options: Options = {
+        layout: {
+          hierarchical: {
+            enabled: true,
+            direction: 'UD',
+            sortMethod: 'directed',
+            levelSeparation: 100,
+            nodeSpacing: 160,
+            treeSpacing: 200,
           },
         },
-        font: { color: '#ffffff', size: 13, face: 'system-ui' },
-        shape: 'box' as const,
-        shapeProperties: { borderRadius: 8 },
-        borderWidth: 2,
-        borderWidthSelected: 4,
-        margin: 12,
-        level: getLevel(node.id),
-      }))
-    );
+        physics: { enabled: false },
+        interaction: { hover: true, zoomView: true, dragView: true },
+      };
 
-    const visEdges = new DataSet(
-      tree.edges.map((edge, i) => ({
-        id: `e${i}`,
-        from: edge.from,
-        to: edge.to,
-        arrows: { to: { enabled: true, scaleFactor: 0.8 } },
-        color: { color: '#adb5bd', highlight: '#0d6efd' },
-        width: 2,
-        smooth: { type: 'cubicBezier' as const, forceDirection: 'vertical' as const, roundness: 0.4 },
-      }))
-    );
+      if (networkRef.current) networkRef.current.destroy();
 
-    const options: Options = {
-      layout: {
-        hierarchical: {
-          enabled: true,
-          direction: 'UD',
-          sortMethod: 'directed',
-          levelSeparation: 100,
-          nodeSpacing: 160,
-          treeSpacing: 200,
-        },
-      },
-      physics: { enabled: false },
-      interaction: { hover: true, zoomView: true, dragView: true },
-    };
+      const network = new Network(containerRef.current!, { nodes: visNodes as any, edges: visEdges as any }, options);
+      networkRef.current = network;
 
-    if (networkRef.current) networkRef.current.destroy();
-
-    const network = new Network(containerRef.current, { nodes: visNodes as any, edges: visEdges as any }, options);
-    networkRef.current = network;
-
-    network.on('click', (params: any) => {
-      if (params.nodes.length > 0) {
-        const nodeId = params.nodes[0];
-        const node = tree.nodes.find(n => n.id === nodeId);
-        if (node) {
-          setSelectedService(node);
-          onServiceSelect(node.name, node.id);
-          network.selectNodes([nodeId]);
+      network.on('click', (params: any) => {
+        if (params.nodes.length > 0) {
+          const nodeId = params.nodes[0];
+          const node = tree.nodes.find(n => n.id === nodeId);
+          if (node) {
+            setSelectedService(node);
+            onServiceSelect(node.name, node.id);
+            network.selectNodes([nodeId]);
+          }
         }
-      }
-    });
+      });
+    }, 300);  // 300ms debounce
+
+    return () => clearTimeout(timer);
   }, [tree]);
 
   if (loading) {
@@ -214,13 +233,23 @@ const ServiceGraph: React.FC<ServiceGraphProps> = ({ onServiceSelect, onNavigate
 
   return (
     <div className="p-6">
+      {/* Предупреждение о больших деревьях */}
+      {tree && tree.nodes.length > MAX_NODES && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+          <p className="text-sm text-yellow-800">
+            ⚠️ Дерево содержит {tree.nodes.length} услуг. Отображаются первые {MAX_NODES}.
+            Для работы с полным деревом используйте фильтрацию или обратитесь к администратору.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Граф */}
         <div className="lg:col-span-3 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <h3 className="text-lg font-semibold text-gray-800">Дерево SLA-услуг Zabbix</h3>
-              <span className="text-xs text-gray-500">({tree.nodes.length} услуг)</span>
+              <span className="text-xs text-gray-500">({tree?.nodes.length || 0} услуг)</span>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <span className="flex items-center gap-1"><span className="w-3 h-3 bg-green-500 rounded-full"></span> OK</span>

@@ -3,7 +3,8 @@ routers/services.py — Эндпоинты для дерева SLA-услуг и
 Синхронизирует сервисы из Zabbix с локальной БД для управления правами.
 """
 import logging
-from typing import List
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,38 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["services"])
 
+# ============================================
+# In-memory кэш для дерева сервисов
+# ============================================
+_services_cache: Dict[str, Any] = {
+    "data": None,
+    "expires_at": None,
+}
+CACHE_TTL_SECONDS = 300  # 5 минут
+
+
+def _invalidate_services_cache():
+    """Инвалидация кэша сервисов."""
+    global _services_cache
+    _services_cache["data"] = None
+    _services_cache["expires_at"] = None
+
+
+def _get_cached_services_tree() -> Optional[Dict[str, Any]]:
+    """Получение дерева из кэша, если оно валидно."""
+    now = datetime.now()
+    if _services_cache["data"] and _services_cache["expires_at"] and now < _services_cache["expires_at"]:
+        logger.debug("Returning services tree from cache")
+        return _services_cache["data"]
+    return None
+
+
+def _set_cached_services_tree(data: Dict[str, Any]):
+    """Сохранение дерева в кэш."""
+    global _services_cache
+    _services_cache["data"] = data
+    _services_cache["expires_at"] = datetime.now() + timedelta(seconds=CACHE_TTL_SECONDS)
+
 
 @router.get("/services_tree")
 def get_services_tree(
@@ -24,12 +57,19 @@ def get_services_tree(
 ):
     """
     Получение дерева SLA-услуг из Zabbix.
+    Использует кэш (TTL 5 минут) для снижения нагрузки на Zabbix.
     Синхронизирует сервисы с локальной БД.
     Фильтрует по доступным пользователю сервисам.
     """
     try:
-        # Получаем данные из Zabbix
-        tree_data = zabbix_client.get_services_tree()
+        # Проверяем кэш
+        tree_data = _get_cached_services_tree()
+        
+        if tree_data is None:
+            # Кэш истёк или пуст — запрашиваем из Zabbix
+            logger.info("Cache miss, fetching from Zabbix")
+            tree_data = zabbix_client.get_services_tree()
+            _set_cached_services_tree(tree_data)
         
         # Синхронизируем с локальной БД
         _sync_services_to_db(db, tree_data.get("nodes", []))
@@ -133,6 +173,7 @@ def sync_services(
     """
     Принудительная синхронизация сервисов из Zabbix.
     Только для администраторов.
+    Инвалидирует кэш после синхронизации.
     """
     if not current_user.is_admin:
         from fastapi import HTTPException
@@ -141,6 +182,10 @@ def sync_services(
     try:
         tree_data = zabbix_client.get_services_tree()
         count = _sync_services_to_db(db, tree_data.get("nodes", []))
+        
+        # Инвалидируем кэш после синхронизации
+        _invalidate_services_cache()
+        logger.info(f"Services cache invalidated after sync ({count} services)")
         
         return {
             "status": "ok",

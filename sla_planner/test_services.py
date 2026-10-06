@@ -304,5 +304,79 @@ class TestStatusMapping:
                 assert result["nodes"][0]["status"] == expected
 
 
+class TestCyclicReferences:
+    """Тесты циклических ссылок."""
+
+    def test_cyclic_reference_handling(self):
+        """Тест что циклические ссылки не ломают граф."""
+        client = ZabbixClient()
+        client.auth_token = "test_token"
+        
+        # Циклическая ссылка: A -> B -> A
+        mock_response = [
+            {
+                "serviceid": "1",
+                "name": "Service A",
+                "algorithm": "1",
+                "status": "0",
+                "propagation_rule": "1",
+                "parents": [{"serviceid": "2"}],  # Родитель — B
+                "children": [{"serviceid": "2"}],  # Ребёнок — B
+                "tags": [],
+            },
+            {
+                "serviceid": "2",
+                "name": "Service B",
+                "algorithm": "1",
+                "status": "0",
+                "propagation_rule": "1",
+                "parents": [{"serviceid": "1"}],  # Родитель — A
+                "children": [{"serviceid": "1"}],  # Ребёнок — A
+                "tags": [],
+            }
+        ]
+        
+        with patch.object(client, '_make_request') as mock_request:
+            mock_request.return_value = mock_response
+            result = client.get_services_tree()
+            
+            # Должно обработать без ошибки
+            assert len(result["nodes"]) == 2
+            assert len(result["edges"]) == 4  # 2 родителя + 2 ребёнка
+
+
+class TestTriggerExpression:
+    """Тесты expression триггера."""
+
+    def test_trigger_expression_retrieved(self):
+        """Тест что expression триггера подтягивается корректно."""
+        client = ZabbixClient()
+        client.auth_token = "test_token"
+        
+        service_response = [{
+            "serviceid": "1",
+            "name": "Test Service",
+            "problem_tags": [{"tag": "service", "value": "test"}],
+        }]
+        
+        trigger_response = [{
+            "triggerid": "100",
+            "description": "CPU > 90%",
+            "expression": "{host:cpu.usage.last()}>90",  # Expression
+            "priority": "4",
+            "value": "1",
+            "tags": [{"tag": "service", "value": "test"}],
+        }]
+        
+        with patch.object(client, '_make_request') as mock_request:
+            mock_request.side_effect = [service_response, trigger_response]
+            
+            triggers = client.get_service_triggers("1")
+            
+            assert len(triggers) == 1
+            assert triggers[0]["expression"] == "{host:cpu.usage.last()}>90"
+            assert triggers[0]["description"] == "CPU > 90%"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
