@@ -526,6 +526,112 @@ class ZabbixClient:
             logger.error(f"Failed to get SLA report: {e}")
             return {}
 
+    def calculate_sla_availability(
+        self,
+        service_id: str,
+        period_from: datetime,
+        period_to: datetime,
+    ) -> Dict[str, Any]:
+        """
+        Расчёт доступности сервиса за период с учётом исключений.
+        
+        Формула SLA:
+        SLA % = (Total Period Time - Downtime + Excluded Downtime) / Total Period Time × 100
+        
+        Args:
+            service_id: ID сервиса в Zabbix
+            period_from: Начало периода (UTC)
+            period_to: Конец периода (UTC)
+            
+        Returns:
+            Dict с метриками:
+            - sla_percentage: SLA %
+            - total_time: Общее время периода (сек)
+            - downtime: Время простоя (сек)
+            - excluded_downtime: Исключённое время (сек)
+            - effective_downtime: Эффективное время простоя (сек)
+        """
+        try:
+            # Получаем SLA с исключениями
+            sla_data = self.get_sla_report()
+            if not sla_data:
+                return {"error": "SLA not found"}
+            
+            excluded_downtimes = sla_data.get("excluded_downtimes", [])
+            
+            # Общее время периода (в секундах)
+            total_seconds = (period_to - period_from).total_seconds()
+            
+            if total_seconds <= 0:
+                return {"error": "Invalid period"}
+            
+            # Получаем события простоя для сервиса из Zabbix
+            # Используем event.get для получения проблем
+            events = self._make_request("event.get", {
+                "objectids": [service_id],
+                "source": "0",  # Trigger events
+                "value": "1",   # Problem state
+                "time_from": int(period_from.timestamp()),
+                "time_till": int(period_to.timestamp()),
+                "selectTags": "extend",
+                "sortfield": ["clock"],
+                "sortorder": "ASC",
+            })
+            
+            # Рассчитываем время простоя
+            downtime_seconds = 0
+            for event in events:
+                event_start = int(event.get("clock", 0))
+                event_end = int(event.get("r_clock", period_to.timestamp()))
+                
+                # Ограничиваем рамками периода
+                event_start = max(event_start, int(period_from.timestamp()))
+                event_end = min(event_end, int(period_to.timestamp()))
+                
+                if event_end > event_start:
+                    downtime_seconds += (event_end - event_start)
+            
+            # Рассчитываем исключённое время простоя
+            excluded_seconds = 0
+            period_from_ts = int(period_from.timestamp())
+            period_to_ts = int(period_to.timestamp())
+            
+            for exclusion in excluded_downtimes:
+                excl_from = int(exclusion.get("period_from", 0))
+                excl_to = int(exclusion.get("period_to", 0))
+                
+                # Проверяем пересечение с периодом
+                if excl_to > period_from_ts and excl_from < period_to_ts:
+                    # Ограничиваем рамками периода
+                    effective_from = max(excl_from, period_from_ts)
+                    effective_to = min(excl_to, period_to_ts)
+                    
+                    if effective_to > effective_from:
+                        excluded_seconds += (effective_to - effective_from)
+            
+            # Эффективное время простоя (за вычетом исключений)
+            effective_downtime = max(0, downtime_seconds - excluded_seconds)
+            
+            # Расчёт SLA %
+            availability_time = total_seconds - effective_downtime
+            sla_percentage = (availability_time / total_seconds) * 100 if total_seconds > 0 else 0
+            
+            return {
+                "service_id": service_id,
+                "period_from": period_from.isoformat(),
+                "period_to": period_to.isoformat(),
+                "sla_percentage": round(sla_percentage, 4),
+                "total_time_seconds": total_seconds,
+                "downtime_seconds": downtime_seconds,
+                "excluded_downtime_seconds": excluded_seconds,
+                "effective_downtime_seconds": effective_downtime,
+                "availability_seconds": availability_time,
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to calculate SLA availability: {e}")
+            return {"error": str(e)}
+
 
 # Глобальный экземпляр клиента
 zabbix_client = ZabbixClient()

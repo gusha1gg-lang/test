@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse
 from config import settings
 from database import init_db
 from auth import get_current_user, CurrentUser
-from routers import works, services, calendar, settings as settings_router, users, audit, auth
+from routers import works, services, calendar, settings as settings_router, users, audit, auth, sla, sla, sla, sla
 from zabbix_client import zabbix_client
 
 # Настройка логирования
