@@ -1,0 +1,45 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Установка системных зависимостей
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Копирование requirements
+COPY sla_planner/requirements.txt .
+COPY tests/requirements-test.txt ./tests/
+
+# Установка Python зависимостей
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r tests/requirements-test.txt
+
+# Копирование кода
+COPY sla_planner/ ./sla_planner/
+COPY src/ ./src/
+COPY package.json vite.config.js tsconfig.json index.html ./
+
+# Копирование тестов
+COPY tests/ ./tests/
+
+# Создание директории для результатов тестов
+RUN mkdir -p /app/test-results
+
+# Установка переменных окружения по умолчанию
+ENV DATABASE_URL=postgresql://test_user:test_pass@test-db:5432/sla_planner_test
+ENV ZABBIX_URL=http://zabbix-mock:8080/api_jsonrpc.php
+ENV ZABBIX_USERNAME=Admin
+ENV ZABBIX_PASSWORD=zabbix
+ENV ZABBIX_SLA_NAME=Test SLA
+ENV AUTH_MODE=mock
+ENV APP_HOST=0.0.0.0
+ENV APP_PORT=8000
+ENV DEBUG=true
+
+# Рабочая директория
+WORKDIR /app/sla_planner
+
+# Команда по умолчанию
+CMD ["python", "-m", "pytest", "../tests/", "-v", "--tb=short"]

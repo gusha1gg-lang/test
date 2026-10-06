@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # Мок Zabbix API для тестирования
+  zabbix-mock:
+    image: python:3.11-slim
+    container_name: zabbix-mock
+    working_dir: /app
+    volumes:
+      - ./tests/mock_zabbix:/app
+    command: python mock_server.py
+    ports:
+      - "8080:8080"
+    networks:
+      - test-network
+
+  # Тестовая БД PostgreSQL
+  test-db:
+    image: postgres:15-alpine
+    container_name: sla-planner-test-db
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+      POSTGRES_DB: sla_planner_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - test-db-data:/var/lib/postgresql/data
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d sla_planner_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Тестовый контейнер приложения
+  test-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: sla-planner-test
+    environment:
+      - DATABASE_URL=postgresql://test_user:test_pass@test-db:5432/sla_planner_test
+      - ZABBIX_URL=http://zabbix-mock:8080/api_jsonrpc.php
+      - ZABBIX_USERNAME=Admin
+      - ZABBIX_PASSWORD=zabbix
+      - ZABBIX_SLA_NAME=Test SLA
+      - AUTH_MODE=mock
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - DEBUG=true
+    depends_on:
+      test-db:
+        condition: service_healthy
+      zabbix-mock:
+        condition: service_started
+    volumes:
+      - ./tests:/app/tests
+      - ./test-results:/app/test-results
+    networks:
+      - test-network
+    command: >
+      bash -c "
+        python -m pytest tests/ -v --tb=short --html=test-results/report.html --self-contained-html
+        && echo '✅ All tests passed!'
+        || echo '❌ Some tests failed'
+      "
+
+volumes:
+  test-db-data:
+
+networks:
+  test-network:
+    driver: bridge
