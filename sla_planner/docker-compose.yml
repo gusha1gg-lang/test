@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # Основное приложение
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+    restart: unless-stopped
+    volumes:
+      - ./static:/app/static
+      - ./templates:/app/templates
+
+  # PostgreSQL
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-sla_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-sla_pass}
+      POSTGRES_DB: ${DB_NAME:-sla_planner}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  # Nginx reverse proxy (для HTTPS)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  pgdata:
